@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Package, ShoppingCart, BarChart3, Settings, LogOut, Plus, Search, Filter, Eye, Edit, Trash2, Download, Bell } from 'lucide-react';
+import { User, Package, ShoppingCart, BarChart3, Settings, LogOut, Plus, Search, Filter, Eye, Edit, Trash2, Download, Bell, X, Save } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:3001';
 
@@ -24,6 +24,8 @@ const OrderManagementSystem = () => {
     paymentReceived: false
   });
   const [orderFilters, setOrderFilters] = useState({ status: '', customerName: '' });
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
 
   // Inventory states
   const [inventoryForm, setInventoryForm] = useState({ productId: '', name: '', quantity: 0 });
@@ -48,9 +50,7 @@ const OrderManagementSystem = () => {
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
       
-      // Check if response is ok
       if (!response.ok) {
-        // Try to parse error message
         try {
           const errorData = await response.json();
           throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
@@ -62,7 +62,6 @@ const OrderManagementSystem = () => {
       const data = await response.json();
       return data;
     } catch (error) {
-      // Handle network errors
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         throw new Error('Network error: Please check if the server is running and CORS is configured');
       }
@@ -213,6 +212,56 @@ const OrderManagementSystem = () => {
     }
   };
 
+  // New functions for view, edit, delete orders
+  const viewOrder = (order) => {
+    setSelectedOrder(order);
+    setCurrentView('view-order');
+  };
+
+  const editOrder = (order) => {
+    setEditingOrder({ ...order });
+    setCurrentView('edit-order');
+  };
+
+  const updateOrder = async (e) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      await apiCall(`/osm/${editingOrder._id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          customerName: editingOrder.customerName,
+          items: editingOrder.items,
+          paymentReceived: editingOrder.paymentReceived
+        })
+      });
+      
+      addNotification('Order updated successfully!', 'success');
+      setEditingOrder(null);
+      setCurrentView('orders');
+      fetchOrders();
+    } catch (error) {
+      addNotification(error.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteOrder = async (orderId) => {
+    if (window.confirm('Are you sure you want to delete this order? This action cannot be undone.')) {
+      try {
+        await apiCall(`/osm/${orderId}`, {
+          method: 'DELETE'
+        });
+        
+        addNotification('Order deleted successfully!', 'success');
+        fetchOrders();
+      } catch (error) {
+        addNotification(error.message, 'error');
+      }
+    }
+  };
+
   const addInventoryItem = async (e) => {
     e.preventDefault();
     try {
@@ -256,6 +305,30 @@ const OrderManagementSystem = () => {
 
   const updateOrderItem = (index, field, value) => {
     setOrderForm(prev => ({
+      ...prev,
+      items: prev.items.map((item, i) => 
+        i === index ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+
+  // Helper functions for editing orders
+  const addEditOrderItem = () => {
+    setEditingOrder(prev => ({
+      ...prev,
+      items: [...prev.items, { productId: '', name: '', quantity: 1, price: 0 }]
+    }));
+  };
+
+  const removeEditOrderItem = (index) => {
+    setEditingOrder(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateEditOrderItem = (index, field, value) => {
+    setEditingOrder(prev => ({
       ...prev,
       items: prev.items.map((item, i) => 
         i === index ? { ...item, [field]: value } : item
@@ -595,8 +668,26 @@ const OrderManagementSystem = () => {
                     </span>
                     <span>{new Date(order.createdAt).toLocaleDateString()}</span>
                     <div style={styles.actionButtons}>
-                      <button style={styles.iconButton} title="View Order">
+                      <button 
+                        style={styles.iconButton} 
+                        onClick={() => viewOrder(order)}
+                        title="View Order"
+                      >
                         <Eye size={16} />
+                      </button>
+                      <button 
+                        style={styles.iconButton}
+                        onClick={() => editOrder(order)}
+                        title="Edit Order"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button 
+                        style={{...styles.iconButton, color: '#ef4444', borderColor: '#ef4444'}}
+                        onClick={() => deleteOrder(order._id)}
+                        title="Delete Order"
+                      >
+                        <Trash2 size={16} />
                       </button>
                       {order.status === 'PENDING' && (
                         <>
@@ -630,6 +721,179 @@ const OrderManagementSystem = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* View Order View */}
+        {currentView === 'view-order' && selectedOrder && (
+          <div style={styles.content}>
+            <div style={styles.contentHeader}>
+              <h1>Order Details</h1>
+              <button 
+                style={styles.secondaryButton}
+                onClick={() => setCurrentView('orders')}
+              >
+                <X size={18} />
+                Close
+              </button>
+            </div>
+            
+            <div style={styles.orderDetails}>
+              <div style={styles.orderHeader}>
+                <div style={styles.orderInfo}>
+                  <h2>Order #{selectedOrder._id}</h2>
+                  <p style={styles.orderDate}>
+                    Created: {new Date(selectedOrder.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <span style={{...styles.statusBadge, backgroundColor: getStatusColor(selectedOrder.status)}}>
+                  {selectedOrder.status}
+                </span>
+              </div>
+              
+              <div style={styles.orderSection}>
+                <h3>Customer Information</h3>
+                <p><strong>Name:</strong> {selectedOrder.customerName}</p>
+                <p><strong>Payment Status:</strong> 
+                  <span style={{color: selectedOrder.paymentReceived ? '#10b981' : '#ef4444', marginLeft: '8px'}}>
+                    {selectedOrder.paymentReceived ? 'Paid' : 'Unpaid'}
+                  </span>
+                </p>
+              </div>
+              
+              <div style={styles.orderSection}>
+                <h3>Order Items</h3>
+                <div style={styles.itemsList}>
+                  {selectedOrder.items?.map((item, index) => (
+                    <div key={index} style={styles.orderItem}>
+                      <div style={styles.itemDetails}>
+                        <strong>{item.name}</strong>
+                        <p>Product ID: {item.productId}</p>
+                      </div>
+                      <div style={styles.itemQuantity}>
+                        Qty: {item.quantity}
+                      </div>
+                      <div style={styles.itemPrice}>
+                        ${item.price?.toFixed(2) || '0.00'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div style={styles.orderTotal}>
+                  <strong>
+                    Total: ${selectedOrder.items?.reduce((total, item) => 
+                      total + (item.quantity * (item.price || 0)), 0
+                    ).toFixed(2) || '0.00'}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Order View */}
+        {currentView === 'edit-order' && editingOrder && (
+          <div style={styles.content}>
+            <div style={styles.contentHeader}>
+              <h1>Edit Order</h1>
+              <button 
+                style={styles.secondaryButton}
+                onClick={() => {setEditingOrder(null); setCurrentView('orders');}}
+              >
+                Cancel
+              </button>
+            </div>
+            
+            <form onSubmit={updateOrder} style={styles.form}>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Customer Name</label>
+                <input
+                  type="text"
+                  value={editingOrder.customerName}
+                  onChange={(e) => setEditingOrder(prev => ({...prev, customerName: e.target.value}))}
+                  style={styles.input}
+                  required
+                />
+              </div>
+              
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Order Items</label>
+                {editingOrder.items?.map((item, index) => (
+                  <div key={index} style={styles.itemRow}>
+                    <input
+                      type="text"
+                      placeholder="Product ID"
+                      value={item.productId}
+                      onChange={(e) => updateEditOrderItem(index, 'productId', e.target.value)}
+                      style={styles.input}
+                      required
+                    />
+                    <input
+                      type="text"
+                      placeholder="Product Name"
+                      value={item.name}
+                      onChange={(e) => updateEditOrderItem(index, 'name', e.target.value)}
+                      style={styles.input}
+                      required
+                    />
+                    <input
+                      type="number"
+                      placeholder="Quantity"
+                      value={item.quantity}
+                      onChange={(e) => updateEditOrderItem(index, 'quantity', parseInt(e.target.value))}
+                      style={styles.input}
+                      min="1"
+                      required
+                    />
+                    <input
+                      type="number"
+                      placeholder="Price"
+                      value={item.price}
+                      onChange={(e) => updateEditOrderItem(index, 'price', parseFloat(e.target.value))}
+                      style={styles.input}
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                    {editingOrder.items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeEditOrderItem(index)}
+                        style={styles.removeButton}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addEditOrderItem}
+                  style={styles.addButton}
+                >
+                  <Plus size={16} />
+                  Add Item
+                </button>
+              </div>
+              
+              <div style={styles.formGroup}>
+                <label style={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={editingOrder.paymentReceived}
+                    onChange={(e) => setEditingOrder(prev => ({...prev, paymentReceived: e.target.checked}))}
+                    style={styles.checkbox}
+                  />
+                  Payment Received
+                </label>
+              </div>
+              
+              <button type="submit" style={styles.primaryButton} disabled={loading}>
+                <Save size={18} />
+                {loading ? 'Updating Order...' : 'Update Order'}
+              </button>
+            </form>
           </div>
         )}
 
@@ -1146,6 +1410,88 @@ const styles = {
     boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
   },
   
+  // Order Details Styles
+  orderDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px'
+  },
+  
+  orderHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: '20px',
+    backgroundColor: '#f9fafb',
+    borderRadius: '8px',
+    border: '1px solid #e5e7eb'
+  },
+  
+  orderInfo: {
+    flex: 1
+  },
+  
+  orderDate: {
+    color: '#6b7280',
+    fontSize: '14px',
+    margin: '4px 0 0 0'
+  },
+  
+  orderSection: {
+    padding: '20px',
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    border: '1px solid #e5e7eb'
+  },
+  
+  itemsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    marginTop: '16px'
+  },
+  
+  orderItem: {
+    display: 'grid',
+    gridTemplateColumns: '2fr 120px 120px',
+    gap: '16px',
+    alignItems: 'center',
+    padding: '12px',
+    backgroundColor: '#f9fafb',
+    borderRadius: '6px',
+    border: '1px solid #e5e7eb'
+  },
+  
+  itemDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px'
+  },
+  
+  itemQuantity: {
+    textAlign: 'center',
+    fontWeight: '600',
+    color: '#374151'
+  },
+  
+  itemPrice: {
+    textAlign: 'right',
+    fontWeight: '600',
+    color: '#059669',
+    fontSize: '16px'
+  },
+  
+  orderTotal: {
+    textAlign: 'right',
+    marginTop: '16px',
+    padding: '16px',
+    backgroundColor: '#f0f9ff',
+    borderRadius: '6px',
+    border: '1px solid #0ea5e9',
+    fontSize: '18px',
+    color: '#0c4a6e'
+  },
+  
   // Form Styles
   form: {
     display: 'flex',
@@ -1244,18 +1590,20 @@ const styles = {
   },
   
   secondaryButton: {
-    backgroundColor: '#f3f4f6',
-    color: '#374151',
-    border: '1px solid #d1d5db',
-    borderRadius: '8px',
+    backgroundColor: '#f9fafb',            
+    color: '#1f2937',                      
+    border: '1px solid #d1d5db',           
+    borderRadius: '10px',                  
     padding: '12px 24px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
-    transition: 'background-color 0.2s'
+    fontSize: '15px',                      
+    fontWeight: '600',                     
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)', 
+    transition: 'all 0.25s ease',         
+    outline: 'none',
   },
   
   iconButton: {
